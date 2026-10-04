@@ -1,0 +1,91 @@
+---
+title: "Bulk_RNAseq_analysis"
+author: "Chiara Simiele"
+date: "2026-09-29"
+output: html_document
+---
+
+```{r}
+library(recount3)
+library(recount)
+library(edgeR)
+library(tidyverse)
+library(Seurat)
+```
+Load RSE Objects and Convert Coverage to Counts
+```{r}
+# Load RSE objects for the three tissues
+rse_brain  <- readRDS("rse_brain.RDS")
+rse_colon  <- readRDS("rse_colon.RDS")
+rse_spleen <- readRDS("rse_spleen.RDS")
+
+# Convert coverage (raw_counts) to gene-level read counts
+assays(rse_brain)$counts  <- transform_counts(rse_brain)
+assays(rse_colon)$counts  <- transform_counts(rse_colon)
+assays(rse_spleen)$counts <- transform_counts(rse_spleen)
+```
+
+Compute TPM and CPM
+```{r}
+# TPM using recount
+assays(rse_brain)$TPM  <- recount::getTPM(rse_brain)
+assays(rse_colon)$TPM  <- recount::getTPM(rse_colon)
+assays(rse_spleen)$TPM <- recount::getTPM(rse_spleen)
+
+# CPM using edgeR
+assays(rse_brain)$CPM  <- cpm(assays(rse_brain)$counts)
+assays(rse_colon)$CPM  <- cpm(assays(rse_colon)$counts)
+assays(rse_spleen)$CPM <- cpm(assays(rse_spleen)$counts)
+
+```
+Inspect Assays
+```{r}
+assays(rse_brain)
+head(assays(rse_brain)$TPM)
+head(assays(rse_brain)$CPM)
+
+```
+*QUALITY CONTROL*
+```{r}
+## -------------------------------
+## Quality Control: RIN, mapping %, rRNA contamination
+## -------------------------------
+
+# Function to evaluate QC for a given RSE object
+check_qc <- function(rse, rin_cutoff = 6, map_cutoff = 80, rrna_cutoff = 0.10) {
+  
+  df <- as.data.frame(colData(rse))
+  
+  df$sample_id <- colnames(rse)
+  
+  df$QC_pass <- with(df,
+                     gtex.smrin >= rin_cutoff &
+                     `recount_qc.star.uniquely_mapped_reads_%_both` >= map_cutoff &
+                     gtex.smrrnart < rrna_cutoff)
+  
+  return(df[, c("sample_id", "gtex.smrin",
+                "recount_qc.star.uniquely_mapped_reads_%_both",
+                "gtex.smrrnart", "QC_pass")])
+}
+
+## Run QC for each tissue
+qc_brain  <- check_qc(rse_brain)
+qc_colon  <- check_qc(rse_colon)
+qc_spleen <- check_qc(rse_spleen)
+
+## Display QC tables
+qc_brain
+qc_colon
+qc_spleen
+
+## Select only samples passing QC
+brain_keep  <- qc_brain$sample_id[qc_brain$QC_pass]
+colon_keep  <- qc_colon$sample_id[qc_colon$QC_pass]
+spleen_keep <- qc_spleen$sample_id[qc_spleen$QC_pass]
+
+brain_keep
+colon_keep
+spleen_keep
+
+```
+
