@@ -1,0 +1,1171 @@
+---
+title: "Transcriptomics project"
+output: html_document
+date: "2026-09-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+if (!require("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+
+BiocManager::install("recount3")
+```
+```{r}
+RStudio.Version()$version
+```
+
+
+```{r}
+BiocManager::install(c(
+    "recount", "GenomicRanges", "limma", "edgeR", "DESeq2",
+    "regionReport", "clusterProfiler", "org.Hs.eg.db", "gplots",
+    "derfinder", "GenomicState", "bumphunter", "derfinderPlot", "sessioninfo"
+))
+```
+
+
+```{r}
+install.packages("tidyverse")
+```
+```{r}
+install.packages('Seurat')
+library(Seurat)
+
+```
+```{r}
+devtools::install_github("thomasp85/patchwork")
+```
+
+```{r}
+library(recount3)
+library(recount)
+library(edgeR)
+```
+Loading the libraries needed for the analysis, as well as the RDS objects of the three tissues to be analyzed. In my case, brain, heart, and pancreas. After loading, we convert the “coverage” counts into counts as we know them.
+Count table is in:assays(rse_brain)$raw_counts
+```{r}
+rse_brain <- readRDS("rse_brain.RDS")
+rse_colon <- readRDS("rse_colon.RDS")
+rse_spleen <- readRDS("rse_spleen.RDS")
+
+assays(rse_brain)$counts <- transform_counts(rse_brain)
+assays(rse_colon)$counts <- transform_counts(rse_colon)
+assays(rse_spleen)$counts <- transform_counts(rse_spleen)
+```
+
+Notice that now “assays” contains two tables: the “coverage” (raw_counts) and the integer count of reads overlapping each gene (counts). Both will have the same information on each row and column.
+```{r}
+#1. Calculation of TPM using the getTPM function from the recount package
+assays(rse_brain)$TPM  <- recount::getTPM(rse_brain)
+assays(rse_colon)$TPM  <- recount::getTPM(rse_colon)
+assays(rse_spleen)$TPM <- recount::getTPM(rse_spleen)
+
+#2. CPM calculation using edgeR 
+assays(rse_brain)$CPM <- cpm(assays(rse_brain)$counts)
+assays(rse_colon)$CPM <- cpm(assays(rse_colon)$counts)
+assays(rse_spleen)$CPM <- cpm(assays(rse_spleen)$counts)
+
+```
+
+```{r}
+# Check all stored assay names in the SummarizedExperiment object
+assays(rse_brain)
+
+# Access the first few rows of your new TPM matrix
+head(assays(rse_brain)$TPM)
+
+# Access the first few rows of your new CPM matrix
+head(assays(rse_brain)$CPM)
+```
+**Quality control**: I need to select three reliable samples for each tissue
+```{r}
+## -------------------------------
+## Quality Control: RIN, mapping %, rRNA contamination
+## -------------------------------
+
+##BRAIN SAMPLES##
+#sample br69
+names(colData(rse_brain))
+colnames(rse_brain)[69]
+
+colData(rse_brain)[69, ]
+colData(rse_brain)$gtex.smrin[69] >= 6
+colData(rse_brain)$gtex.smrin[69]
+
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[69] >= 80
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[69]
+
+colData(rse_brain)$gtex.smrrnart[69] < 0.10
+colData(rse_brain)$gtex.smrrnart[69]
+```
+```{r}
+#sample br70
+colnames(rse_brain)[70]
+
+colData(rse_brain)[70, ]
+
+### --- RIN >= 6 ---
+colData(rse_brain)$gtex.smrin[70] >= 6
+colData(rse_brain)$gtex.smrin[70]
+####Not ok in this case####
+
+### --- Check mapped reads >= 80% ---
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[70] >= 80
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[70]
+
+### --- Check rRNA < 10% ---
+colData(rse_brain)$gtex.smrrnart[70] < 0.10
+colData(rse_brain)$gtex.smrrnart[70]
+
+```
+```{r}
+#sample br71
+
+colnames(rse_brain)[71]
+colData(rse_brain)[71, ]
+
+### --- Check RIN >= 6 ---
+colData(rse_brain)$gtex.smrin[71] >= 6
+colData(rse_brain)$gtex.smrin[71]
+
+### --- Check mapped reads >= 80% ---
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[71] >= 80
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[71]
+
+### --- Check rRNA < 10% ---
+colData(rse_brain)$gtex.smrrnart[71] < 0.10
+colData(rse_brain)$gtex.smrrnart[71]
+
+```
+```{r}
+#sample br72
+
+colnames(rse_brain)[72]
+colData(rse_brain)[72, ]
+
+### --- Check RIN >= 6 ---
+colData(rse_brain)$gtex.smrin[72] >= 6
+colData(rse_brain)$gtex.smrin[72]
+###Not ok in this case##
+### --- Check mapped reads >= 80% ---
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[72] >= 80
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[72]
+
+### --- Check rRNA < 10% ---
+colData(rse_brain)$gtex.smrrnart[72] < 0.10
+colData(rse_brain)$gtex.smrrnart[72]
+###Not ok in this case###
+```
+```{r}
+#sample br73
+colnames(rse_brain)[73]
+colData(rse_brain)[73, ]
+
+### --- Check RIN >= 6 ---
+colData(rse_brain)$gtex.smrin[73] >= 6
+colData(rse_brain)$gtex.smrin[73]
+
+### --- Check mapped reads >= 80% ---
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[73] >= 80
+colData(rse_brain)$"recount_qc.star.uniquely_mapped_reads_%_both"[73]
+
+### --- Check rRNA < 10% ---
+colData(rse_brain)$gtex.smrrnart[73] < 0.10
+colData(rse_brain)$gtex.smrrnart[73]
+
+```
+Brain samples selected: br69, br71, br73
+
+```{r}
+#COLON SAMPLES QC
+#sample col69
+colnames(rse_colon)[69]
+colData(rse_colon)[69, ]
+
+### --- Check RIN >= 6 ---
+colData(rse_colon)$gtex.smrin[69] >= 6
+colData(rse_colon)$gtex.smrin[69]
+
+### --- Check mapped reads >= 80% ---
+colData(rse_colon)$"recount_qc.star.uniquely_mapped_reads_%_both"[69] >= 80
+colData(rse_colon)$"recount_qc.star.uniquely_mapped_reads_%_both"[69]
+
+### --- Check rRNA < 10% ---
+colData(rse_colon)$gtex.smrrnart[69] < 0.10
+colData(rse_colon)$gtex.smrrnart[69]
+##OK
+```
+```{r}
+#SAMPLE colon 70
+colnames(rse_colon)[70]
+
+colData(rse_colon)[70, ]
+
+### --- check RIN >= 6 ---
+colData(rse_colon)$gtex.smrin[70] >= 6
+colData(rse_colon)$gtex.smrin[70]
+
+### --- check mapped reads >= 80% ---
+colData(rse_colon)$"recount_qc.star.uniquely_mapped_reads_%_both"[70] >= 80
+colData(rse_colon)$"recount_qc.star.uniquely_mapped_reads_%_both"[70]
+
+### --- check rRNA < 10% ---
+colData(rse_colon)$gtex.smrrnart[70] < 0.10
+colData(rse_colon)$gtex.smrrnart[70]
+##OK
+```
+```{r}
+###sample colon 71
+colnames(rse_colon)[71]
+
+colData(rse_colon)[71, ]
+
+### --- Check RIN >= 6 ---
+colData(rse_colon)$gtex.smrin[71] >= 6
+colData(rse_colon)$gtex.smrin[71]
+
+### --- check mapped reads >= 80% ---
+colData(rse_colon)$"recount_qc.star.uniquely_mapped_reads_%_both"[71] >= 80
+colData(rse_colon)$"recount_qc.star.uniquely_mapped_reads_%_both"[71]
+
+### --- check rRNA < 10% ---
+colData(rse_colon)$gtex.smrrnart[71] < 0.10
+colData(rse_colon)$gtex.smrrnart[71]
+###OK
+```
+Colon selected samples: col69, col70, col71
+
+```{r}
+#SPLEEN SAMPLES QC:
+
+colnames(rse_spleen)[69]
+
+colData(rse_spleen)[69, ]
+
+### --- Check RIN >= 6 ---
+colData(rse_spleen)$gtex.smrin[69] >= 6
+colData(rse_spleen)$gtex.smrin[69]
+
+### --- Check mapped reads >= 80% ---
+colData(rse_spleen)$"recount_qc.star.uniquely_mapped_reads_%_both"[69] >= 80
+colData(rse_spleen)$"recount_qc.star.uniquely_mapped_reads_%_both"[69]
+
+### --- Check rRNA < 10% ---
+colData(rse_spleen)$gtex.smrrnart[69] < 0.10
+colData(rse_spleen)$gtex.smrrnart[69]
+##OK
+```
+```{r}
+###sample 70
+colnames(rse_spleen)[70]
+
+colData(rse_spleen)[70, ]
+
+### --- Check RIN >= 6 ---
+colData(rse_spleen)$gtex.smrin[70] >= 6
+colData(rse_spleen)$gtex.smrin[70]
+
+### --- Check mapped reads >= 80% ---
+colData(rse_spleen)$"recount_qc.star.uniquely_mapped_reads_%_both"[70] >= 80
+colData(rse_spleen)$"recount_qc.star.uniquely_mapped_reads_%_both"[70]
+
+### --- Check rRNA < 10% ---
+colData(rse_spleen)$gtex.smrrnart[70] < 0.10
+colData(rse_spleen)$gtex.smrrnart[70]
+##OK
+```
+```{r}
+#Sample 71
+colnames(rse_spleen)[71]
+
+colData(rse_spleen)[71, ]
+
+### --- Check RIN >= 6 ---
+colData(rse_spleen)$gtex.smrin[71] >= 6
+colData(rse_spleen)$gtex.smrin[71]
+
+### --- Check mapped reads >= 80% ---
+colData(rse_spleen)$"recount_qc.star.uniquely_mapped_reads_%_both"[71] >= 80
+colData(rse_spleen)$"recount_qc.star.uniquely_mapped_reads_%_both"[71]
+
+### --- Check rRNA < 10% ---
+colData(rse_spleen)$gtex.smrrnart[71] < 0.10
+colData(rse_spleen)$gtex.smrrnart[71]
+###OK
+```
+Spleen selected samples: spl69, spl70, spl71
+
+
+*NORMALIZATION*
+
+```{r}
+library(edgeR)
+
+### 1. Selection of samples for each tissue
+rse_brain_selected   <- rse_brain[, c(69, 71, 73)]
+rse_colon_selected   <- rse_colon[, c(69, 70, 71)]
+rse_spleen_selected  <- rse_spleen[, c(69, 70, 71)]
+
+### 2. Extraction of the count data
+counts_brain_selected   <- assays(rse_brain_selected)$counts
+counts_colon_selected   <- assays(rse_colon_selected)$counts
+counts_spleen_selected  <- assays(rse_spleen_selected)$counts
+
+### 3. Merge the count matrices into a single matrix
+x <- cbind(counts_brain_selected,
+           counts_colon_selected,
+           counts_spleen_selected)
+
+### 4. Rename the columns 
+colnames(x) <- c("Brain69","Brain71","Brain73",
+                 "Colon69","Colon70","Colon71",
+                 "Spleen69","Spleen70","Spleen71")
+
+### 5. Rename the rows using the gene names
+rownames(x) <- rowData(rse_brain_selected)$gene_name
+
+### 6. Create the DGEList object
+y <- DGEList(counts = x)
+
+### 7. Add the “group” factor (tissue)
+group <- as.factor(c("Brain","Brain","Brain",
+                     "Colon","Colon","Colon",
+                     "Spleen","Spleen","Spleen"))
+y$samples$group <- group
+
+### 8. Add the covariates
+y$samples$rin <- as.factor(c(colData(rse_brain_selected)$gtex.smrin,
+                             colData(rse_colon_selected)$gtex.smrin,
+                             colData(rse_spleen_selected)$gtex.smrin))
+
+y$samples$slice <- as.factor(c(colData(rse_brain_selected)$gtex.smtsd,
+                               colData(rse_colon_selected)$gtex.smtsd,
+                               colData(rse_spleen_selected)$gtex.smtsd))
+
+y$samples$sex <- as.factor(c(colData(rse_brain_selected)$gtex.sex,
+                             colData(rse_colon_selected)$gtex.sex,
+                             colData(rse_spleen_selected)$gtex.sex))
+
+y$samples$age <- as.factor(c(colData(rse_brain_selected)$gtex.age,
+                             colData(rse_colon_selected)$gtex.age,
+                             colData(rse_spleen_selected)$gtex.age))
+
+y$samples$rRNA <- as.factor(c(colData(rse_brain_selected)$gtex.smrrnart,
+                              colData(rse_colon_selected)$gtex.smrrnart,
+                              colData(rse_spleen_selected)$gtex.smrrnart))
+
+y$samples$mapped <- as.factor(c(colData(rse_brain_selected)$"recount_qc.star.uniquely_mapped_reads_%_both",
+                                colData(rse_colon_selected)$"recount_qc.star.uniquely_mapped_reads_%_both",
+                                colData(rse_spleen_selected)$"recount_qc.star.uniquely_mapped_reads_%_both"))
+
+y$samples$chrm <- as.factor(c(colData(rse_brain_selected)$"recount_qc.aligned_reads%.chrm",
+                              colData(rse_colon_selected)$"recount_qc.aligned_reads%.chrm",
+                              colData(rse_spleen_selected)$"recount_qc.aligned_reads%.chrm"))
+
+###9. Filtering genes with zero counts
+table(rowSums(y$counts == 0) == 9)
+keep.exprs <- filterByExpr(y, group = group)
+y <- y[keep.exprs,, keep.lib.sizes = FALSE]
+```
+
+
+```{r}
+### 10. logCPM before normalization
+logcpm_before <- cpm(y, log = TRUE)
+### --- Boxplot BEFORE normalization ---
+par(mar = c(8, 5, 4, 2))   
+boxplot(logcpm_before,
+        main = "Before normalization",
+        xlab = "",
+        ylab = "logCPM",
+        las = 2,
+        col = "lightblue")
+
+mtext("Samples", side = 1, line = 6)   
+
+
+### --- 11. Normalization TMM ---
+y <- normLibSizes(y, method = "TMM")
+
+y
+
+### --- 12. logCPM after normalization ---
+logcpm_after <- cpm(y, log=TRUE)
+par(mar = c(8, 5, 4, 2))
+
+boxplot(logcpm_after,
+        main = "After normalization (TMM)",
+        xlab = "",
+        ylab = "logCPM",
+        las = 2,
+        col = "lightgreen")
+
+mtext("Samples", side = 1, line = 6)
+```
+
+
+```{r}
+design <- model.matrix(~0+group, data=y$samples)
+colnames(design) <- levels(y$samples$group)
+design
+```
+
+
+```{r}
+# Normalization factors
+
+norm_factor <- y$samples$norm.factors
+effective_lib_size <- y$samples$lib.size * y$samples$norm.factors
+sample_names <- colnames(y$counts)
+norm_factor <- y$samples$norm.factors
+effective_lib_size <- y$samples$lib.size * y$samples$norm.factors
+
+sample_names <- colnames(y$counts)
+
+norm_table <- data.frame(
+  sample = sample_names,
+  normalization_factor = round(norm_factor, 4),
+  effective_library_size = round(effective_lib_size, 0)
+)
+
+norm_table
+
+```
+Multidimensional scaling (MDS) operates on distances between samples, therefore it requires expression values that are comparable across libraries.
+
+Using non‑normalized logCPM would introduce technical biases:
+
+- samples with larger library sizes would appear artificially “more expressed”
+
+- samples with different composition (e.g., many highly expressed genes) would separate for technical rather than biological reasons
+
+- the resulting MDS plot would reflect technical variation, not true biological structure
+
+Normalization with TMM is specifically designed to remove these technical effects before computing logCPM, ensuring that MDS captures biologically meaningful differences between samples.
+```{r}
+library(RColorBrewer)
+logcpm <- cpm(y, log=TRUE)
+
+# Colors for the three tissues
+tissue_colors <- brewer.pal(3, "Set1")
+names(tissue_colors) <- levels(y$samples$group)
+
+# Color assigned to each sample
+point_colors <- tissue_colors[y$samples$group]
+
+# MDS plot
+plotMDS(logcpm,
+        col = point_colors,
+        pch = 19,
+        cex = 1.5,
+        main = "MDS plot of selected samples",
+        xlab = "Dimension 1",
+        ylab = "Dimension 2")
+
+legend("top", inset = -0.15,
+       legend = levels(y$samples$group),
+       col = tissue_colors,
+       pch = 19,
+       horiz = TRUE,
+       cex = 1.2,
+       xpd = TRUE)
+
+
+```
+```{r}
+library(RColorBrewer)
+
+plot_mds_covariate <- function(logcpm, covariate, palette, title) {
+
+  mds <- plotMDS(logcpm)
+
+# Expand the axes by 20%
+x_range <- range(mds$x)
+  y_range <- range(mds$y)
+
+  xlim_expanded <- c(x_range[1] - 0.2*diff(x_range),
+                     x_range[2] + 0.2*diff(x_range))
+
+  ylim_expanded <- c(y_range[1] - 0.2*diff(y_range),
+                     y_range[2] + 0.2*diff(y_range))
+
+# Color scheme based on the covariate
+
+  cov_levels <- as.factor(covariate)
+  colors <- palette[as.numeric(cov_levels)]
+
+  par(mai = c(1, 1, 1, 3))   
+  plot(mds$x, mds$y,
+       col = colors,
+       pch = 19,
+       cex = 1.5,
+       main = title,
+       xlab = "Dimension 1",
+       ylab = "Dimension 2",
+       xlim = xlim_expanded,
+       ylim = ylim_expanded,
+       cex.lab = 1.4,
+       cex.main = 1.6)
+
+  text(mds$x, mds$y,
+       labels = covariate,
+       pos = 3,
+       cex = 1.2)
+
+  legend("topright",
+         inset = c(-0.25, 0),   
+         legend = levels(cov_levels),
+         col = palette[1:length(levels(cov_levels))],
+         pch = 19,
+         cex = 1.2,
+         xpd = TRUE)
+}
+pal_age <- colorRampPalette(brewer.pal(9, "YlGnBu"))(length(unique(y$samples$age)))
+pal_sex <- brewer.pal(length(unique(y$samples$sex)), "Set1")
+pal_RIN <- colorRampPalette(brewer.pal(9, "PuBuGn"))(length(unique(y$samples$rin)))
+pal_rRNA <- colorRampPalette(brewer.pal(9, "OrRd"))(length(unique(y$samples$rRNA)))
+pal_mapped <- colorRampPalette(brewer.pal(9, "Greens"))(length(unique(y$samples$mapped)))
+pal_chrm <- brewer.pal(length(unique(y$samples$chrm)), "Set3")
+
+
+plot_mds_covariate(logcpm, y$samples$age, pal_age, "MDS labeled by Age")
+plot_mds_covariate(logcpm, y$samples$sex, pal_sex, "MDS labeled by Sex")
+plot_mds_covariate(logcpm, y$samples$rin, pal_RIN, "MDS labeled by RIN")
+plot_mds_covariate(logcpm, y$samples$rRNA, pal_rRNA, "MDS labeled by rRNA")
+plot_mds_covariate(logcpm, y$samples$mapped, pal_mapped, "MDS labeled by Mapped Reads")
+plot_mds_covariate(logcpm, y$samples$chrm, pal_chrm, "MDS labeled by Chromosomal Bias")
+```
+*Chromosomal Bias*
+An important pattern emerges when examining the chromosomal bias across samples:
+
+the upper‑right cluster corresponds to low values (6–7)
+
+the upper‑left cluster corresponds to high values (22–36)
+
+the lower cluster corresponds to intermediate values (8–15)
+
+The separation of clusters aligns precisely with the chromosomal bias values. This is exactly the type of structure expected when investigating why certain replicates appear more distant than others.
+
+To assess potential technical or biological drivers of sample separation, I generated six independent MDS plots, each annotated with a different covariate (age, sex, RIN, rRNA content, mapped reads, chromosomal bias). Among these, chromosomal bias was the only covariate showing a pattern consistent with the observed clustering: samples with low, intermediate, and high values formed distinct groups. All other covariates showed no relationship with replicate distances.
+
+I therefore conclude that chromosomal bias is the factor explaining the observed differences between replicates.
+
+
+*Differentially Genes* 
+```{r}
+y <- estimateDisp(y, design)
+fit <- glmQLFit(y, design)
+
+qlfBC <- glmQLFTest(fit, contrast=c(1,-1,0))    #Brain (top) vs Colon (bottom)
+qlfBS <- glmQLFTest(fit, contrast=c(1,0,-1))    #Brain (top) vs Spleen (bottom)
+qlfCS <- glmQLFTest(fit, contrast=c(0, -1, 1))   # Colon (top) vs Spleen (bottom)
+
+#thresholds FDR < 0.01 LogFC>1 LogFC<-1
+dtBC <- decideTests(qlfBC, p.value=0.01, lfc=1)
+dtBS <- decideTests(qlfBS, p.value=0.01, lfc=1)
+dtCS <- decideTests(qlfCS, p.value=0.01, lfc=1)
+
+#numero up/down 
+summary(dtBC)
+summary(dtBS)
+summary(dtCS)
+
+```
+```{r}
+counts <- data.frame(
+  Comparison = c("Brain vs Colon", "Brain vs Spleen", "Colon vs Spleen"),
+  Up = c(sum(dtBC==1), sum(dtBS==1), sum(dtCS==1)),
+  Down = c(sum(dtBC==-1), sum(dtBS==-1), sum(dtCS==-1))
+)
+
+barplot(t(as.matrix(counts[,2:3])),
+        beside=TRUE,
+        col=c("red","blue"),
+        names.arg=counts$Comparison,
+        legend.text=c("Up","Down"),
+        main="DE genes per comparison")
+
+```
+Genes up‑regulated in each tissue relative to the other two
+```{r}
+#Brain up vs Colon AND Spleen
+brain_up_BC <- rownames(dtBC)[dtBC == 1]
+brain_up_BS <- rownames(dtBS)[dtBS == 1]
+
+brain_up_both <- intersect(brain_up_BC, brain_up_BS)
+length(brain_up_both)
+
+#Colon up vs Brain AND Spleen
+colon_up_BC <- rownames(dtBC)[dtBC == -1]
+colon_up_CS <- rownames(dtCS)[dtCS == 1]
+
+colon_up_both <- intersect(colon_up_BC, colon_up_CS)
+length(colon_up_both)
+
+#Spleen up vs Brain AND Colon
+spleen_up_BS <- rownames(dtBS)[dtBS == -1]
+spleen_up_CS <- rownames(dtCS)[dtCS == -1]
+
+spleen_up_both <- intersect(spleen_up_BS, spleen_up_CS)
+length(spleen_up_both)
+
+write.table(brain_up_both, "brain_markers.txt", quote=FALSE, row.names=FALSE)
+write.table(colon_up_both, "colon_markers.txt", quote=FALSE, row.names=FALSE)
+write.table(spleen_up_both, "spleen_markers.txt", quote=FALSE, row.names=FALSE)
+
+#top 3 markers
+#These are the three DE tables ordered by significance
+resBC <- topTags(qlfBC, n=Inf, adjust.method="BH", sort.by="PValue")$table
+resBS <- topTags(qlfBS, n=Inf, adjust.method="BH", sort.by="PValue")$table
+resCS <- topTags(qlfCS, n=Inf, adjust.method="BH", sort.by="PValue")$table
+
+#brain top 3 markers (ordered per FDR)
+brain_res <- resBC[brain_up_both, ]
+brain_res <- brain_res[order(brain_res$FDR), ]
+top3_brain <- rownames(brain_res)[1:3]
+top3_brain
+
+#colon top 3 markers (ordered per FDR)
+colon_res <- resCS[colon_up_both, ]
+colon_res <- colon_res[order(colon_res$FDR), ]
+top3_colon <- rownames(colon_res)[1:3]
+top3_colon
+
+#spleen top 3 markers (ordered per FDR)
+spleen_res <- resCS[spleen_up_both, ]
+spleen_res <- spleen_res[order(spleen_res$FDR), ]
+top3_spleen <- rownames(spleen_res)[1:3]
+top3_spleen
+
+#summary dataframe
+top_markers <- data.frame(
+  Tissue = c("Brain","Colon","Spleen"),
+  Top1 = c(top3_brain[1], top3_colon[1], top3_spleen[1]),
+  Top2 = c(top3_brain[2], top3_colon[2], top3_spleen[2]),
+  Top3 = c(top3_brain[3], top3_colon[3], top3_spleen[3])
+)
+
+top_markers
+```
+```{r}
+# Complete DE table (Brain vs Colon)
+resBC <- topTags(qlfBC, n=Inf, adjust.method="BH", sort.by="PValue")$table
+
+# Select only the Brain‑specific markers
+brain_res <- resBC[brain_up_both, ]
+
+# Sort by PValue
+brain_res <- brain_res[order(brain_res$PValue), ]
+
+# Save table
+write.table(brain_res,
+            "brain_markers_ordered_by_PValue.txt",
+            quote=FALSE, sep="\t")
+
+```
+Assess over-expression of gene FABP7
+```{r}
+# TPM
+assays(rse_brain)$TPM   <- recount::getTPM(rse_brain)
+assays(rse_colon)$TPM   <- recount::getTPM(rse_colon)
+assays(rse_spleen)$TPM  <- recount::getTPM(rse_spleen)
+
+which(rowData(rse_brain)$gene_name == "FABP7")
+
+```
+```{r}
+i <- which(rowData(rse_brain)$gene_name == "FABP7")
+
+boxplot(assays(rse_brain)$TPM[i,],
+        assays(rse_colon)$TPM[i,],
+        assays(rse_spleen)$TPM[i,],
+        outline = FALSE,
+        names = c("Brain","Colon","Spleen"),
+        ylab = "TPM",
+        main = "Expression of FABP7")
+
+```
+```{r}
+#Wilcoxon test 
+#Brain vs Colon
+wilcox.test(assays(rse_brain)$TPM[i,], assays(rse_colon)$TPM[i,])
+
+#Brain vs Spleen
+wilcox.test(assays(rse_brain)$TPM[i,], assays(rse_spleen)$TPM[i,])
+
+brain_res
+colon_res
+```
+Enrichment analysis online
+
+```{r}
+writeClipboard(brain_up_both)
+
+```
+```{r}
+writeClipboard(colon_up_both)
+
+```
+```{r}
+writeClipboard(spleen_up_both)
+
+```
+
+
+*Single Cell RNA-Seq*
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+
+load("./SRA866994_SRS4545964.sparse.RData") 
+
+sm@Dimnames [[1]] <- sub("_[^_]*$", "", sm@Dimnames [[1]])
+genenames <- rownames ( sm ) 
+head(rownames(sm))
+
+rownames ( sm ) <- make.names ( genenames , unique=TRUE)
+brainSeurat <- CreateSeuratObject (counts = sm , project = "brainSeurat", min.cells = 3, min.features = 200)
+brainSeurat
+head(rownames(sm), 20)
+
+```
+*QUALITY CONTROL*
+```{r}
+head(colnames(brainSeurat))
+
+#mtRNA comes from cell damage
+grep("^mt.",rownames(brainSeurat),value = TRUE)
+brainSeurat[["percent.mt"]] <- PercentageFeatureSet(brainSeurat, pattern = "^mt.")
+#ribosomal protein genes “eat up” a lot of reads because highly expressed. 
+grep("^Rpl|^Rps", rownames(brainSeurat), value = TRUE)
+brainSeurat[["percent.ribo"]] <- PercentageFeatureSet(brainSeurat, pattern = "^Rpl|^Rps")
+head(brainSeurat@meta.data, 5)
+
+VlnPlot(brainSeurat, 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), 
+        ncol = 4)
+
+VlnPlot(brainSeurat, 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), 
+        ncol = 4, pt.size = 0)
+
+#We can check if the different parameters are correlated with one another.
+
+
+plot1 <- FeatureScatter(brainSeurat, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(brainSeurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+plot3 <- FeatureScatter(brainSeurat, feature1 = "nCount_RNA", feature2 = "percent.ribo")
+plot3
+
+# Only visible correlation is between the overall number of reads and the number of genes detected in each cell, which is normal. 
+# Cells removed are “outilers” in the distributions. 
+brainSeurat <- subset(brainSeurat, 
+                      subset = nFeature_RNA > 200 & 
+                               nFeature_RNA < 4000 & 
+                               percent.mt < 4)
+#samples remained
+brainSeurat
+```
+*Normalization and PCA*
+```{r}
+#normalization per log counts*10k
+brainSeurat <- NormalizeData(
+  brainSeurat,
+  normalization.method = "LogNormalize",
+  scale.factor = 10000
+)
+#2,000 most variable genes
+brainSeurat <- FindVariableFeatures(
+  brainSeurat,
+  selection.method = "vst",
+  nfeatures = 2000
+)
+
+# The 10 most variable genes
+top10 <- head(VariableFeatures(brainSeurat), 10)
+
+# plot variable features
+plot_var <- VariableFeaturePlot(brainSeurat)
+plot_var <- LabelPoints(plot = plot_var, points = top10, repel = TRUE)
+plot_var
+# scaling 
+all.genes <- rownames(brainSeurat)
+brainSeurat <- ScaleData(brainSeurat, features = all.genes)
+
+#PCA on 2,000 most variable genes
+brainSeurat <- RunPCA(
+  brainSeurat,
+  features = VariableFeatures(object = brainSeurat)
+)
+#loadings
+print(brainSeurat[["pca"]], dims = 1:5, nfeatures = 5)
+
+VizDimLoadings(brainSeurat, dims = 1:2, reduction = "pca")
+#PCA selection of number of components
+ElbowPlot(brainSeurat, ndims = 30)
+pc.touse <- (brainSeurat$pca@stdev)^2
+pc.touse <- pc.touse / sum(pc.touse)
+pc.touse <- cumsum(pc.touse)[1:50]
+pc.touse <- min(which(pc.touse >= 0.75))
+pc.touse
+
+```
+
+*CLUSTERING*
+
+```{r}
+#Option A — 10 PC, resolution 0.5
+
+brain10 <- FindNeighbors(brainSeurat, dims = 1:10)
+brain10_05 <- FindClusters(brain10, resolution = 0.5)
+
+brain10_05 <- RunUMAP(brain10_05, dims = 1:10)
+DimPlot(brain10_05, reduction = "umap", label = TRUE)
+table(Idents(brain10_05))
+
+#Opzione B — 14 PC, resolution 0.8
+brain14 <- FindNeighbors(brainSeurat, dims = 1:14)
+brain14_08 <- FindClusters(brain14, resolution = 0.8)
+
+brain14_08 <- RunUMAP(brain14_08, dims = 1:14)
+DimPlot(brain14_08, reduction = "umap", label = TRUE)
+table(Idents(brain14_08))
+
+#Opzione C — 14 PC, resolution 0.4
+
+brain14_04 <- FindClusters(brain14, resolution = 0.4)
+
+brain14_04 <- RunUMAP(brain14_04, dims = 1:14)
+DimPlot(brain14_04, reduction = "umap", label = TRUE)
+table(Idents(brain14_04))
+```
+Check of cycle phase bias
+```{r}
+library(dplyr)
+
+#cell cycle phase check
+cc.mouse <- readRDS("cc.genes.mouse.RDS")
+
+s.genes.mouse  <- cc.mouse$s.genes
+g2m.genes.mouse <- cc.mouse$g2m.genes
+brainSeurat <- CellCycleScoring(
+  brainSeurat,
+  s.features  = s.genes.mouse,
+  g2m.features = g2m.genes.mouse,
+  set.ident   = FALSE
+)
+table(brainSeurat$Phase)
+
+brain14 <- FindNeighbors(brainSeurat, dims = 1:14)
+brain14_04 <- FindClusters(brain14, resolution = 0.4)
+
+brain14_04@meta.data %>%
+  group_by(seurat_clusters, Phase) %>%
+  count() %>%
+  group_by(seurat_clusters) %>%
+  mutate(percent = 100*n/sum(n)) %>%
+  ungroup() %>%
+  ggplot(aes(x = seurat_clusters, y = percent, fill = Phase)) +
+  geom_col() +
+  ggtitle("Percentage of cell cycle phases per cluster")
+
+```
+Cell cycle influence:  
+We evaluated the distribution of cell cycle phases across clusters. Most clusters were dominated by G1-phase cells, indicating that cell cycle effects did not drive the clustering.
+A few clusters showed enrichment for S/G2M phases, consistent with proliferative or activated microglial states, which are biologically expected in neuroinflammatory conditions.
+Overall, cell cycle does not introduce major bias in the clustering.
+
+```{r}
+#resolution checks
+brain14_04 <- FindClusters(brain14, resolution = 0.4)
+brain14_03 <- FindClusters(brain14, resolution = 0.3)
+brain14_02 <- FindClusters(brain14, resolution = 0.2)
+
+```
+Testing Clustering results of brain14_04
+For 10x data, the choice is to employ a non parametric test (once again, the Wilcoxon test!) which is the default. Notice also another parameter (min.pct): it means that a gene has to be found expressed (counts > 0) in at least 25% of the cells of the cluster.
+we can output the top genes for each cluster. Notice that here they are sorted by logFC - more informative than “p_val_adj”, since a lot of genes will have a FDR close to zero with smallest changes.
+```{r}
+#find markers for all clusters
+brain.markers <- FindAllMarkers(
+  brain14_04,
+  only.pos        = TRUE,
+  min.pct         = 0.25,
+  logfc.threshold = 0.25,
+  test.use        = "wilcox"
+)
+
+brain.markers %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::slice_max(n = 5, order_by = avg_log2FC) -> top5
+
+```
+```{r}
+#Heatmap with 10 top markers
+top10 <- brain.markers %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::slice_max(n = 10, order_by = avg_log2FC)
+
+DoHeatmap(brain14_04, features = top10$gene) + NoLegend()
+
+```
+One or more clusters show mitochondrial or ribosomal genes as top markers, suggesting a technical bias rather than a true cell type.
+```{r}
+#Detection of technical artifact clusters
+#marker “one vs all”
+brain.markers <- FindAllMarkers(
+  brain14_04,
+  only.pos = TRUE,
+  min.pct = 0.25,
+  logfc.threshold = 0.25
+)
+#top 10 per cluster
+top10 <- brain.markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 10, order_by = avg_log2FC)
+
+brain.markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 10, order_by = avg_log2FC) %>%
+  filter(grepl("^mt-|^Rpl|^Rps|^Gm|^RP", gene))
+#Problem: Clusters 3 and 4 do not show any specific marker genes.
+#Moreover, several of the filtered clusters (1, 6, 7, 10, 11, 12) also display non‑biological markers. These include: pseudogenes,non‑coding loci, genomic fragments, ribosomal transcripts, transcriptional artifacts
+#This pattern indicates that these clusters are likely technical artifacts rather than biologically meaningful cell populations.
+#I next attempted to reduce the number of PCs and lower the clustering resolution.
+
+###FINAL MODEL###
+
+brain10 <- FindNeighbors(brainSeurat, dims = 1:10)
+brain10_03 <- FindClusters(brain10, resolution = 0.3)
+brain10_03 <- RunUMAP(brain10_03, dims = 1:10)
+DimPlot(brain10_03, reduction = "umap", label = TRUE)
+brain10.markers <- FindAllMarkers(
+  brain10_03,
+  only.pos = TRUE,
+  min.pct = 0.25,
+  logfc.threshold = 0.25
+)
+top10 <- brain10.markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 10, order_by = avg_log2FC)
+
+DoHeatmap(brain10_03, features = top10$gene) + NoLegend()
+brain10.markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 10, order_by = avg_log2FC) %>%
+  filter(grepl("^mt-|^Rpl|^Rps|^Gm|^RP", gene))
+
+#Heatmap inspection
+options(repr.plot.height = 20, repr.plot.width = 10)
+
+DoHeatmap(brain10_03, features = top10$gene) +
+  theme(axis.text.y = element_text(size = 3.5))
+
+```
+
+Checks of technical bias
+```{r}
+brain10_03[["percent.rbp"]] <- PercentageFeatureSet(
+  brain10_03,
+  pattern = "^Rps|^Rpl"
+)
+
+VlnPlot(brain10_03, features = "nCount_RNA")
+VlnPlot(brain10_03, features = "nFeature_RNA")
+VlnPlot(brain10_03, features = "percent.mt")
+VlnPlot(brain10_03, features = "percent.rbp")
+
+brain10_03@meta.data %>%
+  group_by(seurat_clusters, Phase) %>%
+  count() %>%
+  group_by(seurat_clusters) %>%
+  mutate(percent = 100*n/sum(n)) %>%
+  ungroup() %>%
+  ggplot(aes(x = seurat_clusters, y = percent, fill = Phase)) +
+  geom_col() +
+  ggtitle("Percentage of cell cycle phases per cluster")
+
+```
+```{r}
+#Comparison of clusters with overlapping marker genes
+#C1 vs C4
+#STEP 1 — Top markers ordered by fold change (not FDR).
+#This step is used to determine whether the two clusters share the same biological ‘core
+cl1 <- FindMarkers(brain10_03, ident.1 = 1, min.pct = 0.25, test.use = "wilcox")
+cl1 <- cl1[order(-cl1$avg_log2FC), ]
+head(cl1, 10)
+
+cl4 <- FindMarkers(brain10_03, ident.1 = 4, min.pct = 0.25, test.use = "wilcox")
+cl4 <- cl4[order(-cl4$avg_log2FC),]
+head(cl4, n = 10)
+
+#Here we check whether the top 10 markers are similar. 
+
+#Markers of the combined population (cluster 1 + cluster 4):
+#This is the step which reveals whether one cluster is ‘dominated’ by the other.
+cl1_4 <- FindMarkers(brain10_03, ident.1 = c(1,4), min.pct = 0.25)
+head(cl1_4[order(-cl1_4$avg_log2FC),], 10)
+#Direct comparison: cluster 4 vs cluster 1
+#This is the critical step: it assesses whether cluster 4 possesses specific marker genes absent in cluster 1. The result is negative.
+cl4_vs_1 <- FindMarkers(brain10_03, ident.1 = 4, ident.2 = 1, min.pct = 0.25)
+head(cl4_vs_1[order(-cl4_vs_1$avg_log2FC),], 10)
+
+```
+
+Clusters 1 and 4 share the core CD8⁺ T‑cell identity, as shown by the presence of GZMK, CD8A, and CD8B1 among the top markers of both clusters. When the two clusters are combined, these shared markers remain dominant, confirming that they belong to the same major cell type.
+
+However, the direct comparison between cluster 4 and cluster 1 reveals a set of additional genes specifically over‑expressed in cluster 4 (e.g., Bhlhe41, Cebpa, Cd180, St3gal5, Mir99ahg). These genes are not canonical CD8⁺ T‑cell markers but represent transcriptional regulators, activation‑related genes, metabolic modifiers, and non‑coding RNA elements.
+
+This pattern indicates that cluster 4 does not correspond to a different cell type, but rather to a transcriptionally distinct sub‑state within the same CD8⁺ T‑cell population—likely reflecting differences in activation, regulation, or functional state.
+
+```{r}
+#cluster 3 vs 0
+cl0 <- FindMarkers(brain10_03, ident.1 = 0, min.pct = 0.25, test.use = "wilcox")
+cl0 <- cl0[order(-cl0$avg_log2FC), ]
+head(cl0, 10)
+#no common genes
+cl3 <- FindMarkers(brain10_03, ident.1 = 3, min.pct = 0.25, test.use = "wilcox")
+cl3 <- cl3[order(-cl3$avg_log2FC), ]
+head(cl3, 10)
+
+cl0_3 <- FindMarkers(brain10_03, ident.1 = c(0,3), min.pct = 0.25, test.use = "wilcox")
+cl0_3 <- cl0_3[order(-cl0_3$avg_log2FC), ]
+head(cl0_3, 10)
+
+cl3_vs_0 <- FindMarkers(brain10_03, ident.1 = 3, ident.2 = 0, min.pct = 0.25, test.use = "wilcox")
+cl3_vs_0 <- cl3_vs_0[order(-cl3_vs_0$avg_log2FC), ]
+head(cl3_vs_0, 10)
+
+```
+
+Clusters 0 and 3 share the core microglial identity, as confirmed by the combined marker set (Tmem119, P2ry12, P2ry13). Cluster 0 represents homeostatic microglia, while cluster 3 shows increased expression of activation‑related genes (Ccl5, Cst7, Cd74, Ighm), indicating a reactive or phagocytic state. The direct comparison reveals a distinct activation program in cluster 3, demonstrating that clusters 0 and 3 correspond to two functional sub‑states of the same microglial population rather than different cell types.
+
+```{r}
+#cluster 5 
+cl5 <- FindMarkers(brain10_03, ident.1 = 5, min.pct = 0.25, test.use = "wilcox")
+cl5 <- cl5[order(-cl5$avg_log2FC), ]
+head(cl5, 20)
+cl5_vs_4 <- FindMarkers(brain10_03, ident.1 = 5, ident.2 = 4)
+head(cl5_vs_4, 20)
+#Cl1 vs Cl5
+cl1 <- FindMarkers(brain10_03, ident.1 = 1, min.pct = 0.25, test.use = "wilcox")
+cl1 <- cl1[order(-cl1$avg_log2FC), ]
+head(cl1, 10)
+
+cl5 <- FindMarkers(brain10_03, ident.1 = 5, min.pct = 0.25, test.use = "wilcox")
+cl5 <- cl5[order(-cl5$avg_log2FC), ]
+head(cl5, 10)
+
+cl1_5 <- FindMarkers(brain10_03, ident.1 = c(1,5), min.pct = 0.25, test.use = "wilcox")
+cl1_5 <- cl1_5[order(-cl1_5$avg_log2FC), ]
+head(cl1_5, 10)
+
+cl5_vs_1 <- FindMarkers(brain10_03, ident.1 = 5, ident.2 = 1)
+head(cl5_vs_1, 20)
+cl5_vs_1 <- cl5_vs_1[order(-cl5_vs_1$avg_log2FC), ]
+head(cl5_vs_1, 10)
+```
+```{r}
+#cl0 vs cl5
+cl0 <- FindMarkers(brain10_03, ident.1 = 0, min.pct = 0.25, test.use = "wilcox")
+cl0 <- cl0[order(-cl0$avg_log2FC), ]
+head(cl0, 10)
+cl5 <- FindMarkers(brain10_03, ident.1 = 5, min.pct = 0.25, test.use = "wilcox")
+cl5 <- cl5[order(-cl5$avg_log2FC), ]
+head(cl5, 10)
+cl0_5 <- FindMarkers(brain10_03, ident.1 = c(0,5), min.pct = 0.25, test.use = "wilcox")
+cl0_5 <- cl0_5[order(-cl0_5$avg_log2FC), ]
+head(cl0_5, 10)
+cl5_vs_0 <- FindMarkers(brain10_03, ident.1 = 5, ident.2 = 0, min.pct = 0.25, test.use = "wilcox")
+cl5_vs_0 <- cl5_vs_0[order(-cl5_vs_0$avg_log2FC), ]
+head(cl5_vs_0, 10)
+```
+Markers for each tissue:
+```{r}
+all.markers <- FindAllMarkers(
+  brain10_03,
+  only.pos = TRUE,        
+  min.pct = 0.25,
+  logfc.threshold = 0.25
+)
+
+# Top genes for each cluster
+top10 <- all.markers %>% group_by(cluster) %>% top_n(10, avg_log2FC)
+
+```
+```{r}
+levels(brain10_03)
+
+```
+*Cell assignment*
+```{r}
+features.use <- c(
+  "Tmem119",   # cluster 0 microglia
+  "Cd8a",      # cluster 1 CD8 effector
+  "Spp1",      # cluster 2 DAM
+  "Mef2a",      # cluster 3 IFN/stress microglia
+  "Tnfrsf26",      # cluster 4 CD8 naive
+  "Cd8b1",      # cluster 5 CD8 activated
+  "Fn1",       # cluster 6 monocytes/macrophages
+  "Cd79a",     # cluster 7 B cells
+  "Rorc",      # cluster 8 γδ T17
+  "Ncr1",      # cluster 9 NK
+  "Treml4",    # cluster 10 LAM-like macrophages
+  "Cxcr2"      # cluster 11 neutrophils
+)
+
+DotPlot(brain10_03, features = features.use) + RotatedAxis()
+
+
+```
+```{r}
+new.cluster.ids <- c(
+  "Homeostatic microglia",        # 0
+  "CD8 T cells",                  # 1
+  "DAM microglia",                # 2
+  "IFN/stress microglia",         # 3
+  "CD8 naive/central memory",     # 4
+  "Mixed microglia/CD8 T",               # 5
+  "Infiltrating monocytes/macrophages", # 6
+  "B cells",                      # 7
+  "γδ T17 cells",                 # 8
+  "NK cells",                     # 9
+  "LAM-like macrophages",         # 10
+  "Neutrophils"                   # 11
+)
+
+names(new.cluster.ids) <- levels(brain10_03)
+brain10_03 <- RenameIdents(brain10_03, new.cluster.ids)
+DimPlot(brain10_03, reduction = "umap", label = TRUE, label.size = 1.5, pt.size = 0.5, label.box = TRUE) + NoLegend()
+
+```
+
